@@ -1,0 +1,98 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform:
+  - AWS::Serverless-2016-10-31
+Metadata:
+  PatternTransform:
+    Properties:
+      - JSONPath: $.[object Object]
+        Message: Set timeout
+        InputType: number
+    Placeholders:
+      - Placeholder: MyItem
+        message: Set value for 'MyItem' placeholder
+Resources:
+  MyItemConsumer:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: ecom_cart_service::ecom_cart_service.Functions.MyItemConsumer::Process
+      Runtime: dotnetcore3.1
+      CodeUri: bin/publish
+      MemorySize: '256'
+      Timeout: 30
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AWSXrayWriteOnlyAccess
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MyItemTable
+      Tracing: Active
+      Environment:
+        Variables:
+          MyItemTable: !Ref MyItemTable
+      Events:
+        EB:
+          Type: EventBridgeRule
+          Properties:
+            InputPath: $.detail.data
+            EventBusName: commerce
+            Pattern:
+              source:
+                - ecom-shopping-benefits
+              detail-type:
+                - MemberBenefitTableEvent
+  MyItemTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: MemberId
+          AttributeType: S
+        - AttributeName: BenefitType
+          AttributeType: S
+      KeySchema:
+        - AttributeName: MemberId
+          KeyType: HASH
+        - AttributeName: BenefitType
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: !Ref DynamoDBUseBackup
+  LocalMyItemConsumer:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: >-
+        ecom_cart_service::ecom_cart_service.Functions.LocalMyItemConsumer::Process
+      Runtime: dotnetcore3.1
+      CodeUri: bin/publish
+      MemorySize: 3008
+      Timeout: 30
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AWSXrayWriteOnlyAccess
+        - AmazonAPIGatewayInvokeFullAccess
+        - DynamoDBCrudPolicy:
+            TableName: !Ref Cart
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CartMember
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MyItemTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PropagatedStore
+      Environment:
+        Variables:
+          ApiBaseUrl: !ImportValue ApiGatewayBaseUrl
+          CartTable: !Ref Cart
+          CartMemberTable: !Ref CartMember
+          MyItemTable: !Ref MyItemTable
+          PropagatedStore: !Ref PropagatedStore
+      Tracing: Active
+      Events:
+        EventBridge:
+          Type: EventBridgeRule
+          Properties:
+            InputPath: $.detail.data
+            EventBusName: commerce
+            Pattern:
+              source:
+                - !Ref AWS::StackName
+              detail-type:
+                - MyItemTableEvent
